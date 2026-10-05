@@ -1,0 +1,468 @@
+// lib.rs - Contains all Tauri commands and application logic
+// Following Tauri 2.0 patterns: main.rs only calls lib::run()
+
+use lz4::{Decoder, Encoder};
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::io::{Read, Write};
+use std::path::PathBuf;
+use tauri::{AppHandle, Manager};
+
+#[derive(Serialize, Deserialize)]
+pub struct WikipediaChunk {
+    pub index: usize,
+    pub title_prefix: String,
+    pub articles: Vec<ChunkArticle>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ChunkArticle {
+    pub title: String,
+    pub content: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ChunkManifest {
+    pub version: String,
+    pub chunks: Vec<ChunkInfo>,
+    pub total_articles: usize,
+    pub compression: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ChunkInfo {
+    pub index: usize,
+    pub filename: String,
+    pub article_count: usize,
+    pub original_size: usize,
+    pub compressed_size: usize,
+}
+
+fn get_data_dir(app: &AppHandle) -> PathBuf {
+    let app_dir = app.path().app_data_dir().expect("Failed to get app data dir");
+    let wiki_dir = app_dir.join("wikipedia");
+    fs::create_dir_all(&wiki_dir).ok();
+    wiki_dir
+}
+
+#[tauri::command]
+pub fn compress_lz4(data: String) -> Result<Vec<u8>, String> {
+    let input_len = data.len();
+    let mut output: Vec<u8> = Vec::with_capacity(input_len / 2);
+    
+    let mut encoder = lz4::EncoderBuilder::new().build(output).map_err(|e| e.to_string())?;
+    let mut input = std::io::Cursor::new(data);
+    std::io::copy(&mut input, &mut encoder).map_err(|e| e.to_string())?;
+    let (compressed, result) = encoder.finish();
+    result.map_err(|e| e.to_string())?;
+    
+    log::info!("LZ4: {} bytes -> {} bytes ({:.1}%)", 
+               input_len, compressed.len(), 
+               (compressed.len() as f64 / input_len as f64) * 100.0);
+    
+    Ok(compressed)
+}
+
+#[tauri::command]
+pub fn decompress_lz4(data: Vec<u8>) -> Result<String, String> {
+    let mut decoder = lz4::Decoder::new(std::io::Cursor::new(data)).map_err(|e| e.to_string())?;
+    let mut decompressed = Vec::new();
+    std::io::copy(&mut decoder, &mut decompressed).map_err(|e| e.to_string())?;
+    String::from_utf8(decompressed).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn compress_zstd(data: String, level: i32) -> Result<Vec<u8>, String> {
+    let input_len = data.len();
+    let cursor = std::io::Cursor::new(data.into_bytes());
+    let compressed = zstd::stream::encode_all(cursor, level).map_err(|e| e.to_string())?;
+    
+    log::info!("Zstd (level {}): {} bytes -> {} bytes ({:.1}%)", 
+               level, input_len, compressed.len(),
+               (compressed.len() as f64 / input_len as f64) * 100.0);
+    
+    Ok(compressed)
+}
+
+#[tauri::command]
+pub fn decompress_zstd(data: Vec<u8>) -> Result<String, String> {
+    let cursor = std::io::Cursor::new(data);
+    let decompressed = zstd::stream::decode_all(cursor).map_err(|e| e.to_string())?;
+    String::from_utf8(decompressed).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn save_wikipedia_chunk(
+    app: AppHandle,
+    chunk: WikipediaChunk,
+    compression: String,
+) -> Result<ChunkInfo, String> {
+    let wiki_dir = get_data_dir(&app);
+    let json = serde_json::to_string(&chunk).map_err(|e| e.to_string())?;
+    let original_size = json.len();
+    
+    let (compressed, filename) = match compression.as_str() {
+        "zstd" => {
+            let data = compress_zstd(json, 3)?;
+            (data, format!("chunk_{:04}.json.zst", chunk.index))
+        }
+        _ => {
+            let data = compress_lz4(json)?;
+            (data, format!("chunk_{:04}.json.lz4", chunk.index))
+        }
+    };
+    
+    let filepath = wiki_dir.join(&filename);
+    fs::write(&filepath, &compressed).map_err(|e| e.to_string())?;
+    
+    log::info!("Saved chunk {}: {} articles, {} -> {} bytes", 
+               chunk.index, chunk.articles.len(), original_size, compressed.len());
+    
+    Ok(ChunkInfo {
+        index: chunk.index,
+        filename,
+        article_count: chunk.articles.len(),
+        original_size,
+        compressed_size: compressed.len(),
+    })
+}
+
+#[tauri::command]
+pub async fn load_wikipedia_chunk(
+    app: AppHandle,
+    filename: String,
+    compression: String,
+) -> Result<WikipediaChunk, String> {
+    let wiki_dir = get_data_dir(&app);
+    let filepath = wiki_dir.join(&filename);
+    
+    let compressed = fs::read(&filepath).map_err(|e| e.to_string())?;
+    let json = match compression.as_str() {
+        "zstd" => decompress_zstd(compressed)?,
+        _ => decompress_lz4(compressed)?,
+    };
+    
+    serde_json::from_str(&json).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn save_manifest(app: AppHandle, manifest: ChunkManifest) -> Result<(), String> {
+    let wiki_dir = get_data_dir(&app);
+    let manifest_path = wiki_dir.join("manifest.json");
+    let json = serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
+    fs::write(manifest_path, json).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn load_manifest(app: AppHandle) -> Result<Option<ChunkManifest>, String> {
+    let wiki_dir = get_data_dir(&app);
+    let manifest_path = wiki_dir.join("manifest.json");
+    
+    if !manifest_path.exists() {
+        return Ok(None);
+    }
+    
+    let json = fs::read_to_string(manifest_path).map_err(|e| e.to_string())?;
+    serde_json::from_str(&json).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_storage_stats(app: AppHandle) -> Result<StorageStats, String> {
+    let wiki_dir = get_data_dir(&app);
+    let mut total_compressed = 0;
+    let mut total_original = 0;
+    let mut file_count = 0;
+    
+    if wiki_dir.exists() {
+        for entry in fs::read_dir(&wiki_dir).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let path = entry.path();
+            if path.is_file() {
+                let size = fs::metadata(&path).map_err(|e| e.to_string())?.len() as usize;
+                total_compressed += size;
+                file_count += 1;
+            }
+        }
+    }
+    
+    let manifest = load_manifest(app).await?;
+    if let Some(m) = manifest {
+        total_original = m.chunks.iter().map(|c| c.original_size).sum();
+    }
+    
+    Ok(StorageStats {
+        total_compressed,
+        total_original,
+        file_count,
+        compression_ratio: if total_original > 0 {
+            total_compressed as f64 / total_original as f64
+        } else {
+            0.0
+        },
+    })
+}
+
+#[derive(Serialize)]
+struct StorageStats {
+    total_compressed: usize,
+    total_original: usize,
+    file_count: usize,
+    compression_ratio: f64,
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    env_logger::init();
+    
+    tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_shell::init())
+        .setup(|app| {
+            let window = app.get_webview_window("main").unwrap();
+            window.set_title("AI Wikipedia - Powered by Ollama").ok();
+            
+            get_data_dir(&app.handle());
+            log::info!("Storage initialized at {:?}", app.path().app_data_dir().ok());
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            compress_lz4,
+            decompress_lz4,
+            compress_zstd,
+            decompress_zstd,
+            save_wikipedia_chunk,
+            load_wikipedia_chunk,
+            save_manifest,
+            load_manifest,
+            get_storage_stats,
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ChunkArticle {
+    pub title: String,
+    pub content: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ChunkManifest {
+    pub version: String,
+    pub chunks: Vec<ChunkInfo>,
+    pub total_articles: usize,
+    pub compression: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ChunkInfo {
+    pub index: usize,
+    pub filename: String,
+    pub article_count: usize,
+    pub original_size: usize,
+    pub compressed_size: usize,
+}
+
+fn get_data_dir(app: &AppHandle) -> PathBuf {
+    let app_dir = app.path().app_data_dir().expect("Failed to get app data dir");
+    let wiki_dir = app_dir.join("wikipedia");
+    fs::create_dir_all(&wiki_dir).ok();
+    wiki_dir
+}
+
+#[tauri::command]
+pub fn compress_lz4(data: String) -> Result<Vec<u8>, String> {
+    let input_len = data.len();
+    let mut output: Vec<u8> = Vec::with_capacity(input_len / 2);
+    
+    let mut encoder = lz4::EncoderBuilder::new().build(output).map_err(|e| e.to_string())?;
+    let mut input = std::io::Cursor::new(data);
+    std::io::copy(&mut input, &mut encoder).map_err(|e| e.to_string())?;
+    let (compressed, result) = encoder.finish();
+    result.map_err(|e| e.to_string())?;
+    
+    log::info!("LZ4: {} bytes -> {} bytes ({:.1}%)", 
+               input_len, compressed.len(), 
+               (compressed.len() as f64 / input_len as f64) * 100.0);
+    
+    Ok(compressed)
+}
+
+#[tauri::command]
+pub fn decompress_lz4(data: Vec<u8>) -> Result<String, String> {
+    let mut decoder = lz4::Decoder::new(std::io::Cursor::new(data)).map_err(|e| e.to_string())?;
+    let mut decompressed = Vec::new();
+    std::io::copy(&mut decoder, &mut decompressed).map_err(|e| e.to_string())?;
+    String::from_utf8(decompressed).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn compress_zstd(data: String, level: i32) -> Result<Vec<u8>, String> {
+    let input_len = data.len();
+    let cursor = std::io::Cursor::new(data.into_bytes());
+    let compressed = zstd::stream::encode_all(cursor, level).map_err(|e| e.to_string())?;
+    
+    log::info!("Zstd (level {}): {} bytes -> {} bytes ({:.1}%)", 
+               level, input_len, compressed.len(),
+               (compressed.len() as f64 / input_len as f64) * 100.0);
+    
+    Ok(compressed)
+}
+
+#[tauri::command]
+pub fn decompress_zstd(data: Vec<u8>) -> Result<String, String> {
+    let cursor = std::io::Cursor::new(data);
+    let decompressed = zstd::stream::decode_all(cursor).map_err(|e| e.to_string())?;
+    String::from_utf8(decompressed).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn save_wikipedia_chunk(
+    app: AppHandle,
+    chunk: WikipediaChunk,
+    compression: String,
+) -> Result<ChunkInfo, String> {
+    let wiki_dir = get_data_dir(&app);
+    let json = serde_json::to_string(&chunk).map_err(|e| e.to_string())?;
+    let original_size = json.len();
+    
+    let (compressed, filename) = match compression.as_str() {
+        "zstd" => {
+            let data = compress_zstd(json, 3)?;
+            (data, format!("chunk_{:04}.json.zst", chunk.index))
+        }
+        _ => {
+            let data = compress_lz4(json)?;
+            (data, format!("chunk_{:04}.json.lz4", chunk.index))
+        }
+    };
+    
+    let filepath = wiki_dir.join(&filename);
+    fs::write(&filepath, &compressed).map_err(|e| e.to_string())?;
+    
+    log::info!("Saved chunk {}: {} articles, {} -> {} bytes", 
+               chunk.index, chunk.articles.len(), original_size, compressed.len());
+    
+    Ok(ChunkInfo {
+        index: chunk.index,
+        filename,
+        article_count: chunk.articles.len(),
+        original_size,
+        compressed_size: compressed.len(),
+    })
+}
+
+#[tauri::command]
+pub async fn load_wikipedia_chunk(
+    app: AppHandle,
+    filename: String,
+    compression: String,
+) -> Result<WikipediaChunk, String> {
+    let wiki_dir = get_data_dir(&app);
+    let filepath = wiki_dir.join(&filename);
+    
+    let compressed = fs::read(&filepath).map_err(|e| e.to_string())?;
+    let json = match compression.as_str() {
+        "zstd" => decompress_zstd(compressed)?,
+        _ => decompress_lz4(compressed)?,
+    };
+    
+    serde_json::from_str(&json).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn save_manifest(app: AppHandle, manifest: ChunkManifest) -> Result<(), String> {
+    let wiki_dir = get_data_dir(&app);
+    let manifest_path = wiki_dir.join("manifest.json");
+    let json = serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
+    fs::write(manifest_path, json).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn load_manifest(app: AppHandle) -> Result<Option<ChunkManifest>, String> {
+    let wiki_dir = get_data_dir(&app);
+    let manifest_path = wiki_dir.join("manifest.json");
+    
+    if !manifest_path.exists() {
+        return Ok(None);
+    }
+    
+    let json = fs::read_to_string(manifest_path).map_err(|e| e.to_string())?;
+    serde_json::from_str(&json).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_storage_stats(app: AppHandle) -> Result<StorageStats, String> {
+    let wiki_dir = get_data_dir(&app);
+    let mut total_compressed = 0;
+    let mut total_original = 0;
+    let mut file_count = 0;
+    
+    if wiki_dir.exists() {
+        for entry in fs::read_dir(&wiki_dir).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let path = entry.path();
+            if path.is_file() {
+                let size = fs::metadata(&path).map_err(|e| e.to_string())?.len() as usize;
+                total_compressed += size;
+                file_count += 1;
+            }
+        }
+    }
+    
+    let manifest = load_manifest(app).await?;
+    if let Some(m) = manifest {
+        total_original = m.chunks.iter().map(|c| c.original_size).sum();
+    }
+    
+    Ok(StorageStats {
+        total_compressed,
+        total_original,
+        file_count,
+        compression_ratio: if total_original > 0 {
+            total_compressed as f64 / total_original as f64
+        } else {
+            0.0
+        },
+    })
+}
+
+#[derive(Serialize)]
+pub struct StorageStats {
+    total_compressed: usize,
+    total_original: usize,
+    file_count: usize,
+    compression_ratio: f64,
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    env_logger::init();
+    
+    tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_shell::init())
+        .setup(|app| {
+            let window = app.get_webview_window("main").unwrap();
+            window.set_title("AI Wikipedia - Powered by Ollama").ok();
+            
+            get_data_dir(&app.handle());
+            log::info!("Storage initialized at {:?}", app.path().app_data_dir().ok());
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            compress_lz4,
+            decompress_lz4,
+            compress_zstd,
+            decompress_zstd,
+            save_wikipedia_chunk,
+            load_wikipedia_chunk,
+            save_manifest,
+            load_manifest,
+            get_storage_stats,
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}

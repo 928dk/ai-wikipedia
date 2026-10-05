@@ -1,0 +1,708 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Article Viewer - AI Wikipedia</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        
+        :root {
+            --bg: #f5f5f5;
+            --surface: #ffffff;
+            --text: #333;
+            --text-muted: #666;
+            --border: #ddd;
+            --primary: #3b82f6;
+            --primary-hover: #2563eb;
+            --success: #22c55e;
+            --warning: #f59e0b;
+        }
+        
+        .dark {
+            --bg: #1a1a1a;
+            --surface: #2a2a2a;
+            --text: #e5e5e5;
+            --text-muted: #a0a0a0;
+            --border: #404040;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+        }
+        
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+        
+        header {
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            padding: 16px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        
+        .header-left { display: flex; align-items: center; gap: 16px; }
+        
+        h1 { font-size: 1.5rem; font-weight: 600; }
+        
+        .theme-toggle {
+            background: var(--border);
+            border: none;
+            padding: 8px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 1.2rem;
+        }
+        
+        .upload-area {
+            border: 2px dashed var(--border);
+            border-radius: 12px;
+            padding: 40px;
+            text-align: center;
+            margin: 20px 0;
+            background: var(--surface);
+            transition: all 0.2s;
+        }
+        
+        .upload-area:hover { border-color: var(--primary); }
+        .upload-area.dragover { border-color: var(--primary); background: rgba(59, 130, 246, 0.1); }
+        
+        .upload-icon { font-size: 3rem; margin-bottom: 12px; }
+        .upload-text { font-size: 1.1rem; margin-bottom: 8px; }
+        .upload-hint { color: var(--text-muted); font-size: 0.9rem; }
+        
+        input[type="file"] { display: none; }
+        
+        .stats {
+            display: flex;
+            gap: 20px;
+            padding: 16px;
+            background: var(--surface);
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        
+        .stat { flex: 1; text-align: center; }
+        .stat-value { font-size: 1.8rem; font-weight: 700; color: var(--primary); }
+        .stat-label { font-size: 0.85rem; color: var(--text-muted); }
+        
+        .controls {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        
+        .search-input {
+            flex: 1;
+            min-width: 250px;
+            padding: 12px 16px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 1rem;
+            background: var(--surface);
+            color: var(--text);
+        }
+        
+        .btn {
+            padding: 12px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        .btn-primary { background: var(--primary); color: white; }
+        .btn-primary:hover { background: var(--primary-hover); }
+        .btn-success { background: var(--success); color: white; }
+        .btn-success:hover { background: #16a34a; }
+        .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text); }
+        .btn-outline:hover { background: var(--border); }
+        
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        
+        .filters {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 20px;
+        }
+        
+        .filter-btn {
+            padding: 8px 16px;
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            background: transparent;
+            color: var(--text);
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: all 0.2s;
+        }
+        
+        .filter-btn.active { background: var(--primary); color: white; border-color: var(--primary); }
+        .filter-btn:hover:not(.active) { background: var(--border); }
+        
+        .article-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
+        }
+        
+        .article-card {
+            background: var(--surface);
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid var(--border);
+            transition: all 0.2s;
+        }
+        
+        .article-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        .article-card.selected { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary); }
+        
+        .article-images {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+            gap: 4px;
+            padding: 8px;
+            background: #f0f0f0;
+        }
+        
+        .dark .article-images { background: #333; }
+        
+        .article-images img {
+            width: 100%;
+            height: 80px;
+            object-fit: cover;
+            border-radius: 4px;
+        }
+        
+        .article-content { padding: 16px; }
+        
+        .article-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+            margin-bottom: 8px;
+        }
+        
+        .article-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            line-height: 1.3;
+            flex: 1;
+        }
+        
+        .article-checkbox {
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+            accent-color: var(--primary);
+        }
+        
+        .article-meta {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 12px;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+        
+        .article-source {
+            background: var(--primary);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+        }
+        
+        .article-preview {
+            font-size: 0.9rem;
+            line-height: 1.5;
+            color: var(--text-muted);
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        
+        .article-footer {
+            padding: 12px 16px;
+            border-top: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .image-count {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+        
+        .action-bar {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 12px 20px;
+            display: flex;
+            gap: 16px;
+            align-items: center;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+        }
+        
+        .selected-count {
+            font-weight: 600;
+            color: var(--primary);
+        }
+        
+        .article-viewer {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: var(--bg);
+            z-index: 200;
+            display: none;
+            overflow-y: auto;
+        }
+        
+        .article-viewer.open { display: block; }
+        
+        .viewer-header {
+            position: sticky;
+            top: 0;
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            padding: 16px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .close-btn {
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            cursor: pointer;
+            color: var(--text);
+        }
+        
+        .viewer-content {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .viewer-title {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 16px;
+            line-height: 1.2;
+        }
+        
+        .viewer-meta {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 24px;
+            flex-wrap: wrap;
+        }
+        
+        .viewer-images {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        
+        .viewer-images figure {
+            background: var(--surface);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        
+        .viewer-images img {
+            width: 100%;
+            height: 200px;
+            object-fit: cover;
+        }
+        
+        .viewer-images figcaption {
+            padding: 8px 12px;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+        
+        .viewer-body {
+            background: var(--surface);
+            padding: 24px;
+            border-radius: 12px;
+            font-size: 1.05rem;
+            line-height: 1.8;
+            white-space: pre-wrap;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--text-muted);
+        }
+        
+        .empty-icon { font-size: 4rem; margin-bottom: 16px; }
+        
+        @media (max-width: 768px) {
+            .article-grid { grid-template-columns: 1fr; }
+            .action-bar { left: 20px; right: 20px; transform: none; }
+            .viewer-title { font-size: 1.8rem; }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="header-left">
+            <h1>Article Viewer</h1>
+        </div>
+        <button class="theme-toggle" onclick="toggleTheme()">🌙</button>
+    </header>
+    
+    <div class="container">
+        <div class="upload-area" id="uploadArea">
+            <div class="upload-icon">📁</div>
+            <div class="upload-text">Drop JSON files here or click to browse</div>
+            <div class="upload-hint">Supports AI Wikipedia export files and scraped data</div>
+            <input type="file" id="fileInput" accept=".json" multiple>
+        </div>
+        
+        <div class="stats" id="stats" style="display: none;">
+            <div class="stat">
+                <div class="stat-value" id="totalCount">0</div>
+                <div class="stat-label">Total Articles</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value" id="selectedCount">0</div>
+                <div class="stat-label">Selected</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value" id="totalImages">0</div>
+                <div class="stat-label">Images</div>
+            </div>
+        </div>
+        
+        <div class="controls" id="controls" style="display: none;">
+            <input type="text" class="search-input" id="searchInput" placeholder="Search articles...">
+            <button class="btn btn-outline" onclick="selectAll()">Select All</button>
+            <button class="btn btn-outline" onclick="deselectAll()">Deselect All</button>
+            <button class="btn btn-success" onclick="exportSelected()" id="exportBtn" disabled>
+                ⬇ Export Selected (0)
+            </button>
+        </div>
+        
+        <div class="filters" id="filters" style="display: none;">
+            <button class="filter-btn active" data-filter="all">All</button>
+            <button class="filter-btn" data-filter="wikipedia">Wikipedia</button>
+            <button class="filter-btn" data-filter="lex.dk">Lex.dk</button>
+            <button class="filter-btn" data-filter="crawl">Websites</button>
+        </div>
+        
+        <div class="article-grid" id="articleGrid"></div>
+        
+        <div class="empty-state" id="emptyState" style="display: none;">
+            <div class="empty-icon">📰</div>
+            <div class="upload-text">No articles found</div>
+            <div class="upload-hint">Try a different search term</div>
+        </div>
+    </div>
+    
+    <div class="action-bar" id="actionBar" style="display: none;">
+        <span class="selected-count"><span id="actionSelected">0</span> selected</span>
+        <button class="btn btn-outline" onclick="viewSelected()">Preview</button>
+        <button class="btn btn-success" onclick="exportSelected()">Export</button>
+    </div>
+    
+    <div class="article-viewer" id="articleViewer">
+        <div class="viewer-header">
+            <button class="close-btn" onclick="closeViewer()">← Back</button>
+            <div>
+                <button class="btn btn-outline" onclick="toggleViewerSelect()">✓ Select</button>
+            </div>
+        </div>
+        <div class="viewer-content">
+            <h1 class="viewer-title" id="viewerTitle"></h1>
+            <div class="viewer-meta" id="viewerMeta"></div>
+            <div class="viewer-images" id="viewerImages"></div>
+            <div class="viewer-body" id="viewerBody"></div>
+        </div>
+    </div>
+    
+    <script>
+        let articles = [];
+        let selectedIds = new Set();
+        let currentFilter = 'all';
+        let currentSearch = '';
+        let currentViewerId = null;
+        
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const articleGrid = document.getElementById('articleGrid');
+        const stats = document.getElementById('stats');
+        const controls = document.getElementById('controls');
+        const filters = document.getElementById('filters');
+        const actionBar = document.getElementById('actionBar');
+        const emptyState = document.getElementById('emptyState');
+        const searchInput = document.getElementById('searchInput');
+        
+        // Theme
+        function toggleTheme() {
+            document.body.classList.toggle('dark');
+            localStorage.setItem('viewer-theme', document.body.classList.contains('dark') ? 'dark' : 'light');
+        }
+        
+        if (localStorage.getItem('viewer-theme') === 'dark') {
+            document.body.classList.add('dark');
+        }
+        
+        // File upload
+        uploadArea.addEventListener('click', () => fileInput.click());
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+        uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('dragover'));
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            handleFiles(e.dataTransfer.files);
+        });
+        fileInput.addEventListener('change', () => handleFiles(fileInput.files));
+        
+        function handleFiles(files) {
+            articles = [];
+            selectedIds.clear();
+            
+            Array.from(files).forEach(file => {
+                if (file.name.endsWith('.json')) {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        try {
+                            const data = JSON.parse(e.target.result);
+                            const newArticles = data.articles || (Array.isArray(data) ? data : []);
+                            
+                            newArticles.forEach(article => {
+                                if (!articles.find(a => a.title === article.title)) {
+                                    article._source = data.source || detectSource(article);
+                                    article._images = article.images || [];
+                                    articles.push(article);
+                                }
+                            });
+                            
+                            renderArticles();
+                            updateStats();
+                        } catch (err) {
+                            console.error('Error parsing JSON:', err);
+                            alert('Error parsing file: ' + file.name);
+                        }
+                    };
+                    reader.readAsText(file);
+                }
+            });
+        }
+        
+        function detectSource(article) {
+            const url = article.url || '';
+            const title = article.title || '';
+            if (url.includes('wikipedia.org')) return 'wikipedia';
+            if (url.includes('lex.dk') || title.match(/dansk|danmark|nordisk/i)) return 'lex.dk';
+            return 'crawl';
+        }
+        
+        function renderArticles() {
+            const filtered = articles.filter(a => {
+                const matchesSearch = !currentSearch || 
+                    a.title.toLowerCase().includes(currentSearch.toLowerCase()) ||
+                    (a.content || '').toLowerCase().includes(currentSearch.toLowerCase());
+                const matchesFilter = currentFilter === 'all' || a._source === currentFilter;
+                return matchesSearch && matchesFilter;
+            });
+            
+            if (filtered.length === 0) {
+                articleGrid.innerHTML = '';
+                emptyState.style.display = 'block';
+            } else {
+                emptyState.style.display = 'none';
+                articleGrid.innerHTML = filtered.map(article => `
+                    <div class="article-card ${selectedIds.has(article.id) ? 'selected' : ''}" data-id="${article.id}">
+                        ${article._images && article._images.length > 0 ? `
+                            <div class="article-images">
+                                ${article._images.slice(0, 4).map(img => `
+                                    <img src="${img.url}" alt="${img.alt || ''}" loading="lazy" onerror="this.style.display='none'">
+                                `).join('')}
+                            </div>
+                        ` : ''}
+                        <div class="article-content">
+                            <div class="article-header">
+                                <div class="article-title" onclick="openViewer(${article.id})">${article.title}</div>
+                                <input type="checkbox" class="article-checkbox" 
+                                    ${selectedIds.has(article.id) ? 'checked' : ''} 
+                                    onchange="toggleSelect(${article.id})">
+                            </div>
+                            <div class="article-meta">
+                                <span class="article-source">${article._source}</span>
+                                <span>${formatDate(article.created_at || article.updated_at)}</span>
+                            </div>
+                            <div class="article-preview">${article.content || article.summary || ''}</div>
+                        </div>
+                        <div class="article-footer">
+                            <span class="image-count">📷 ${article._images ? article._images.length : 0} images</span>
+                            <button class="btn btn-outline" onclick="openViewer(${article.id})" style="padding: 6px 12px; font-size: 0.85rem;">View</button>
+                        </div>
+                    </div>
+                `).join('');
+            }
+        }
+        
+        function updateStats() {
+            const totalImages = articles.reduce((sum, a) => sum + (a._images ? a._images.length : 0), 0);
+            document.getElementById('totalCount').textContent = articles.length;
+            document.getElementById('selectedCount').textContent = selectedIds.size;
+            document.getElementById('totalImages').textContent = totalImages;
+            document.getElementById('actionSelected').textContent = selectedIds.size;
+            document.getElementById('exportBtn').textContent = `Export Selected (${selectedIds.size})`;
+            document.getElementById('exportBtn').disabled = selectedIds.size === 0;
+            
+            stats.style.display = articles.length > 0 ? 'flex' : 'none';
+            controls.style.display = articles.length > 0 ? 'flex' : 'none';
+            filters.style.display = articles.length > 0 ? 'flex' : 'none';
+            actionBar.style.display = selectedIds.size > 0 ? 'flex' : 'none';
+        }
+        
+        function toggleSelect(id) {
+            if (selectedIds.has(id)) {
+                selectedIds.delete(id);
+            } else {
+                selectedIds.add(id);
+            }
+            renderArticles();
+            updateStats();
+        }
+        
+        function selectAll() {
+            articles.forEach(a => selectedIds.add(a.id));
+            renderArticles();
+            updateStats();
+        }
+        
+        function deselectAll() {
+            selectedIds.clear();
+            renderArticles();
+            updateStats();
+        }
+        
+        function exportSelected() {
+            const selected = articles.filter(a => selectedIds.has(a.id));
+            const exportData = {
+                version: '1.0.0',
+                exported: new Date().toISOString(),
+                source: 'viewer-export',
+                count: selected.length,
+                articles: selected
+            };
+            
+            const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `ai-wikipedia-selection-${new Date().toISOString().split('T')[0]}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+        
+        function openViewer(id) {
+            currentViewerId = id;
+            const article = articles.find(a => a.id === id);
+            if (!article) return;
+            
+            document.getElementById('viewerTitle').textContent = article.title;
+            document.getElementById('viewerMeta').innerHTML = `
+                <span class="article-source">${article._source}</span>
+                <span>${formatDate(article.created_at || article.updated_at)}</span>
+                <span>Confidence: ${Math.round((article.confidence_score || 0.5) * 100)}%</span>
+            `;
+            
+            const images = article._images || article.images || [];
+            document.getElementById('viewerImages').innerHTML = images.length > 0 ? images.map(img => `
+                <figure>
+                    <img src="${img.url}" alt="${img.alt || ''}" onerror="this.parentElement.style.display='none'">
+                    ${img.caption ? `<figcaption>${img.caption}</figcaption>` : ''}
+                </figure>
+            `).join('') : '<p style="color: var(--text-muted);">No images</p>';
+            
+            document.getElementById('viewerBody').textContent = article.content || article.summary || '';
+            
+            document.getElementById('articleViewer').classList.add('open');
+            document.body.style.overflow = 'hidden';
+        }
+        
+        function closeViewer() {
+            document.getElementById('articleViewer').classList.remove('open');
+            document.body.style.overflow = '';
+            currentViewerId = null;
+        }
+        
+        function toggleViewerSelect() {
+            if (currentViewerId) {
+                toggleSelect(currentViewerId);
+            }
+        }
+        
+        function viewSelected() {
+            const selected = articles.filter(a => selectedIds.has(a.id));
+            if (selected.length > 0) {
+                openViewer(selected[0].id);
+            }
+        }
+        
+        // Search
+        searchInput.addEventListener('input', (e) => {
+            currentSearch = e.target.value;
+            renderArticles();
+        });
+        
+        // Filters
+        document.querySelectorAll('.filter-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentFilter = btn.dataset.filter;
+                renderArticles();
+            });
+        });
+        
+        function formatDate(dateStr) {
+            if (!dateStr) return 'Unknown';
+            const date = new Date(dateStr);
+            return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        }
+        
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && document.getElementById('articleViewer').classList.contains('open')) {
+                closeViewer();
+            }
+        });
+    </script>
+</body>
+</html>

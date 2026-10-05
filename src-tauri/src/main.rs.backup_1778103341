@@ -1,0 +1,660 @@
+use lz4;
+use reqwest;
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::time::Duration;
+use tauri::{AppHandle, Manager, Emitter};
+use tokio::time::{interval, Interval};
+use chrono::Utc;
+
+#[derive(Serialize, Deserialize)]
+pub struct WikipediaChunk {
+    pub index: usize,
+    pub title_prefix: String,
+    pub articles: Vec<ChunkArticle>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ChunkArticle {
+    pub title: String,
+    pub content: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ChunkManifest {
+    pub version: String,
+    pub chunks: Vec<ChunkInfo>,
+    pub total_articles: usize,
+    pub compression: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ChunkInfo {
+    pub index: usize,
+    pub filename: String,
+    pub article_count: usize,
+    pub original_size: usize,
+    pub compressed_size: usize,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct SyncConfig {
+    pub enabled: bool,
+    pub interval_hours: u64,
+    pub news_enabled: bool,
+    pub random_enabled: bool,
+    pub max_articles_per_sync: usize,
+    pub last_sync: Option<String>,
+}
+
+impl Default for SyncConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            interval_hours: 24,
+            news_enabled: true,
+            random_enabled: true,
+            max_articles_per_sync: 10,
+            last_sync: None,
+        }
+    }
+}
+
+const SYNC_CONFIG_FILENAME: &str = "sync_config.json";
+const SYNC_QUEUE_FILENAME: &str = "sync_queue.json";
+
+#[derive(Serialize, Deserialize)]
+struct SyncQueue {
+    articles: Vec<PendingArticle>,
+}
+
+#[derive(Serialize, Deserialize)]
+// Background nightly sync worker
+async fn run_nightly_sync(app_handle: tauri::AppHandle) {
+    let mut interval = interval(Duration::from_secs(3600 * 24)); // 24 hours
+    
+    loop {
+        interval.tick().await;
+        
+        log::info!("Starting nightly article sync...");
+        
+        let config = load_sync_config(&app_handle).await;
+        if !config.enabled {
+            log::info!("Nightly sync disabled in config");
+            continue;
+        }
+        
+        let mut titles: Vec<(String, String)> = Vec::new();
+        
+        // Pipe A: Fetch today's featured content
+        if config.news_enabled {
+            match fetch_featured_articles().await {
+                Ok(new_titles) => {
+                    log::info!("Fetched {} featured articles", new_titles.len());
+                    for title in new_titles {
+                        titles.push((title, "news".to_string()));
+                    }
+                }
+                Err(e) => log::error!("Failed to fetch featured: {}", e),
+            }
+        }
+        
+        // Pipe B: Random walk for knowledge expansion
+        if config.random_enabled {
+            for _ in 0..config.max_articles_per_sync.min(5) {
+                match fetch_random_article().await {
+                    Ok(title) => {
+                        titles.push((title, "random".to_string()));
+                    }
+                    Err(e) => log::error!("Failed to fetch random: {}", e),
+                }
+                tokio::time::sleep(Duration::from_secs(2)).await; // Rate limiting
+            }
+        }
+        
+        // Add to sync queue
+        match add_to_queue(&app_handle, titles.clone()).await {
+            Ok(count) => {
+                log::info!("Added {} articles to sync queue", count);
+                
+                // Emit event to frontend
+                let _ = app_handle.emit_all("sync-queue-updated", serde_json::json!({
+                    "count": count,
+                    "articles": titles.iter().map(|(t, s)| serde_json::json!({"title": t, "source": s})).collect::<Vec<_>>()
+                }));
+            }
+            Err(e) => log::error!("Failed to add to queue: {}", e),
+        }
+        
+        // Update last sync time
+        let mut config = load_sync_config(&app_handle).await;
+        config.last_sync = Some(Utc::now().to_rfc3339());
+        save_sync_config(&app_handle, &config).await.ok();
+        
+        log::info!("Nightly sync completed");
+    }
+}
+
+// Load sync config helper
+async fn load_sync_config(app: &tauri::AppHandle) -> SyncConfig {
+    let data_dir = get_data_dir(app);
+    let config_path = data_dir.join(SYNC_CONFIG_FILENAME);
+    
+    if !config_path.exists() {
+        return SyncConfig::default();
+    }
+    
+    match fs::read_to_string(&config_path) {
+        Ok(json) => serde_json::from_str(&json).unwrap_or_default(),
+        Err(_) => SyncConfig::default(),
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct FeaturedResponse {
+    title: String,
+    excerpts: Vec<Excerpt>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct Excerpt {
+    title: String,
+    extract: Option<String>,
+}
+
+// Fetch today's featured content from Wikipedia
+async fn fetch_featured_articles() -> Result<Vec<String>, String> {
+    let client = reqwest::Client::new();
+    let now = Utc::now();
+    let url = format!("{}/{}/{}/{}", WIKI_FEATURED_API, now.year(), 
+                     format!("{:02}", now.month() as u32), format!("{:02}", now.day()));
+    
+    let response = client
+        .get(&url)
+        .header("User-Agent", "AI-Wikipedia/1.0")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch featured: {}", e))?;
+    
+    if !response.status().is_success() {
+        return Err(format!("Featured API returned: {}", response.status()));
+    }
+    
+    let data: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse featured JSON: {}", e))?;
+    
+    let mut titles = Vec::new();
+    
+    // Extract "in the news" titles
+    if let Some(news) = data.get("news") {
+        if let Some(items) = news.as_array() {
+            for item in items {
+                if let Some(title) = item.get("title") {
+                    if let Some(t) = title.as_str() {
+                        titles.push(t.to_string());
+                    }
+                }
+            }
+        }
+    }
+    
+    Ok(titles)
+}
+
+// Fetch a random Wikipedia article title
+async fn fetch_random_article() -> Result<String, String> {
+    let client = reqwest::Client::new();
+    let response = client
+        .get(WIKI_RANDOM_URL)
+        .header("User-Agent", "AI-Wikipedia/1.0")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch random: {}", e))?;
+    
+    // Get the final URL after redirects - it contains the article title
+    if let Some(location) = response.url().path_segments() {
+        let title = location.last().unwrap_or("").replace("_", " ");
+        if !title.is_empty() {
+            return Ok(title);
+        }
+    }
+    
+    Err("Failed to extract title from random article URL".to_string())
+}
+
+// Save sync config
+async fn save_sync_config(app: &AppHandle, config: &SyncConfig) -> Result<(), String> {
+    let data_dir = get_data_dir(app);
+    let config_path = data_dir.join(SYNC_CONFIG_FILENAME);
+    let json = serde_json::to_string_pretty(config)
+        .map_err(|e| e.to_string())?;
+    fs::write(config_path, json)
+        .map_err(|e| e.to_string())
+}
+
+// Load sync config
+async fn load_sync_config(app: &AppHandle) -> SyncConfig {
+    let data_dir = get_data_dir(app);
+    let config_path = data_dir.join(SYNC_CONFIG_FILENAME);
+    
+    if !config_path.exists() {
+        return SyncConfig::default();
+    }
+    
+    match fs::read_to_string(config_path) {
+        Ok(json) => serde_json::from_str(&json).unwrap_or_default(),
+        Err(_) => SyncConfig::default(),
+    }
+}
+
+// Add articles to sync queue
+async fn add_to_queue(app: &AppHandle, titles: Vec<(String, String)>) -> Result<usize, String> {
+    let data_dir = get_data_dir(app);
+    let queue_path = data_dir.join(SYNC_QUEUE_FILENAME);
+    
+    let mut queue: SyncQueue = if queue_path.exists() {
+        let json = fs::read_to_string(&queue_path)
+            .map_err(|e| e.to_string())?;
+        serde_json::from_str(&json).unwrap_or(SyncQueue { articles: Vec::new() })
+    } else {
+        SyncQueue { articles: Vec::new() }
+    };
+    
+    let now = Utc::now().to_rfc3339();
+    for (title, source) in titles {
+        queue.articles.push(PendingArticle {
+            title,
+            source,
+            fetched_at: now.clone(),
+        });
+    }
+    
+    let json = serde_json::to_string_pretty(&queue)
+        .map_err(|e| e.to_string())?;
+    fs::write(queue_path, json)
+        .map_err(|e| e.to_string())?;
+    
+    Ok(queue.articles.len())
+}
+
+fn get_data_dir(app: &AppHandle) -> PathBuf {
+    let app_dir = app.path().app_data_dir().expect("Failed to get app data dir");
+    let wiki_dir = app_dir.join("wikipedia");
+    fs::create_dir_all(&wiki_dir).ok();
+    wiki_dir
+}
+
+#[tauri::command]
+fn compress_lz4(data: String) -> Result<Vec<u8>, String> {
+    let input_len = data.len();
+    let output: Vec<u8> = Vec::with_capacity(input_len / 2);
+    
+    let mut encoder = lz4::EncoderBuilder::new().build(output).map_err(|e| e.to_string())?;
+    let mut input = std::io::Cursor::new(data);
+    std::io::copy(&mut input, &mut encoder).map_err(|e| e.to_string())?;
+    let (compressed, result) = encoder.finish();
+    result.map_err(|e| e.to_string())?;
+    
+    log::info!("LZ4: {} bytes -> {} bytes ({:.1}%)", 
+               input_len, compressed.len(), 
+               (compressed.len() as f64 / input_len as f64) * 100.0);
+    
+    Ok(compressed)
+}
+
+#[tauri::command]
+fn decompress_lz4(data: Vec<u8>) -> Result<String, String> {
+    let mut decoder = lz4::Decoder::new(std::io::Cursor::new(data)).map_err(|e| e.to_string())?;
+    let mut decompressed = Vec::new();
+    std::io::copy(&mut decoder, &mut decompressed).map_err(|e| e.to_string())?;
+    String::from_utf8(decompressed).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn compress_zstd(data: String, level: i32) -> Result<Vec<u8>, String> {
+    let input_len = data.len();
+    let cursor = std::io::Cursor::new(data.into_bytes());
+    let compressed = zstd::stream::encode_all(cursor, level).map_err(|e| e.to_string())?;
+    
+    log::info!("Zstd (level {}): {} bytes -> {} bytes ({:.1}%)", 
+               level, input_len, compressed.len(),
+               (compressed.len() as f64 / input_len as f64) * 100.0);
+    
+    Ok(compressed)
+}
+
+#[tauri::command]
+fn decompress_zstd(data: Vec<u8>) -> Result<String, String> {
+    let cursor = std::io::Cursor::new(data);
+    let decompressed = zstd::stream::decode_all(cursor).map_err(|e| e.to_string())?;
+    String::from_utf8(decompressed).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn save_wikipedia_chunk(
+    app: AppHandle,
+    chunk: WikipediaChunk,
+    compression: String,
+) -> Result<ChunkInfo, String> {
+    let wiki_dir = get_data_dir(&app);
+    let json = serde_json::to_string(&chunk).map_err(|e| e.to_string())?;
+    let original_size = json.len();
+    
+    let (compressed, filename) = match compression.as_str() {
+        "zstd" => {
+            let data = compress_zstd(json, 3)?;
+            (data, format!("chunk_{:04}.json.zst", chunk.index))
+        }
+        _ => {
+            let data = compress_lz4(json)?;
+            (data, format!("chunk_{:04}.json.lz4", chunk.index))
+        }
+    };
+    
+    let filepath = wiki_dir.join(&filename);
+    fs::write(&filepath, &compressed).map_err(|e| e.to_string())?;
+    
+    log::info!("Saved chunk {}: {} articles, {} -> {} bytes", 
+               chunk.index, chunk.articles.len(), original_size, compressed.len());
+    
+    Ok(ChunkInfo {
+        index: chunk.index,
+        filename,
+        article_count: chunk.articles.len(),
+        original_size,
+        compressed_size: compressed.len(),
+    })
+}
+
+#[tauri::command]
+async fn load_wikipedia_chunk(
+    app: AppHandle,
+    filename: String,
+    compression: String,
+) -> Result<WikipediaChunk, String> {
+    let wiki_dir = get_data_dir(&app);
+    let filepath = wiki_dir.join(&filename);
+    
+    let compressed = fs::read(&filepath).map_err(|e| e.to_string())?;
+    let json = match compression.as_str() {
+        "zstd" => decompress_zstd(compressed)?,
+        _ => decompress_lz4(compressed)?,
+    };
+    
+    serde_json::from_str(&json).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn save_manifest(app: AppHandle, manifest: ChunkManifest) -> Result<(), String> {
+    let wiki_dir = get_data_dir(&app);
+    let manifest_path = wiki_dir.join("manifest.json");
+    let json = serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
+    fs::write(manifest_path, json).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn load_manifest(app: AppHandle) -> Result<Option<ChunkManifest>, String> {
+    let wiki_dir = get_data_dir(&app);
+    let manifest_path = wiki_dir.join("manifest.json");
+    
+    if !manifest_path.exists() {
+        return Ok(None);
+    }
+    
+    let json = fs::read_to_string(manifest_path).map_err(|e| e.to_string())?;
+    serde_json::from_str(&json).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn get_storage_stats(app: AppHandle) -> Result<StorageStats, String> {
+    let wiki_dir = get_data_dir(&app);
+    let mut total_compressed = 0;
+    let mut total_original = 0;
+    let mut file_count = 0;
+    
+    if wiki_dir.exists() {
+        for entry in fs::read_dir(&wiki_dir).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let path = entry.path();
+            if path.is_file() {
+                let size = fs::metadata(&path).map_err(|e| e.to_string())?.len() as usize;
+                total_compressed += size;
+                file_count += 1;
+            }
+        }
+    }
+    
+    let manifest = load_manifest(app).await?;
+    if let Some(m) = manifest {
+        total_original = m.chunks.iter().map(|c| c.original_size).sum();
+    }
+    
+    Ok(StorageStats {
+        total_compressed,
+        total_original,
+        file_count,
+        compression_ratio: if total_original > 0 {
+            total_compressed as f64 / total_original as f64
+        } else {
+            0.0
+        },
+    })
+}
+
+#[derive(Serialize)]
+struct StorageStats {
+    total_compressed: usize,
+    total_original: usize,
+    file_count: usize,
+    compression_ratio: f64,
+}
+
+#[tauri::command]
+async fn parse_document(path: String, parser_type: String) -> Result<String, String> {
+    use std::process::Command;
+    use std::path::Path;
+    
+    // Try to find the parser script
+    let script_paths = vec![
+        "src-tauri/parsers/document_parser.py".to_string(),
+        "$HOME/projects/Client/ai-wikipedia/src-tauri/parsers/document_parser.py".to_string(),
+    ];
+    
+    let script_path = script_paths.iter()
+        .find(|p| Path::new(p).exists())
+        .ok_or_else(|| "Parser script not found".to_string())?;
+    
+    // Auto-detect parser type if not specified
+    let output = if parser_type.is_empty() {
+        Command::new("python3")
+            .args(&[script_path.as_str(), &path])
+            .output()
+    } else {
+        Command::new("python3")
+            .args(&[script_path.as_str(), &path, &parser_type])
+            .output()
+    };
+    
+    match output {
+        Ok(out) => {
+            if out.status.success() {
+                String::from_utf8(out.stdout)
+                    .map_err(|e| format!("UTF-8 error: {}", e))
+            } else {
+                let err = String::from_utf8_lossy(&out.stderr);
+                Err(format!("Parse error: {}", err))
+            }
+        }
+        Err(e) => Err(format!("Failed to run parser: {}", e)),
+    }
+}
+
+
+
+#[tauri::command]
+async fn get_article_count(app: AppHandle) -> Result<usize, String> {
+    let wiki_dir = get_data_dir(&app);
+    let mut count = 0;
+    
+    if wiki_dir.exists() {
+        for entry in fs::read_dir(&wiki_dir).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            if entry.path().is_file() {
+                count += 1;
+            }
+        }
+    }
+    
+    Ok(count)
+}
+
+fn main() {
+    env_logger::init();
+    
+    tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_shell::init())
+        .setup(|app| {
+            let window = app.get_webview_window("main").unwrap();
+            window.set_title("AI Wikipedia v1.4.0 - Powered by Ollama").ok();
+            
+            get_data_dir(&app.handle());
+            log::info!("Storage initialized at {:?}", app.path().app_data_dir().ok());
+            
+            // Start nightly sync worker
+            let app_handle = app.handle().clone();
+            tauri::async_runtime::spawn(run_nightly_sync(app_handle));
+            
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            compress_lz4,
+            decompress_lz4,
+            compress_zstd,
+            decompress_zstd,
+            save_wikipedia_chunk,
+            load_wikipedia_chunk,
+            save_manifest,
+            load_manifest,
+            get_storage_stats,
+            get_article_count,
+            scrape_webpage,
+            parse_document,
+            get_sync_config,
+            save_sync_config,
+            get_sync_queue,
+            clear_sync_queue,
+            trigger_sync,
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}
+
+#[tauri::command]
+async fn get_sync_config(app: AppHandle) -> Result<SyncConfig, String> {
+    Ok(load_sync_config(&app).await)
+}
+
+#[tauri::command]
+async fn save_sync_config(app: AppHandle, config: SyncConfig) -> Result<(), String> {
+    save_sync_config(&app, &config).await
+}
+
+#[tauri::command]
+async fn get_sync_queue(app: AppHandle) -> Result<Vec<PendingArticle>, String> {
+    let data_dir = get_data_dir(&app);
+    let queue_path = data_dir.join(SYNC_QUEUE_FILENAME);
+    
+    if !queue_path.exists() {
+        return Ok(Vec::new());
+    }
+    
+    let json = fs::read_to_string(&queue_path).map_err(|e| e.to_string())?;
+    let queue: SyncQueue = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+    Ok(queue.articles)
+}
+
+#[tauri::command]
+async fn clear_sync_queue(app: AppHandle) -> Result<(), String> {
+    let data_dir = get_data_dir(&app);
+    let queue_path = data_dir.join(SYNC_QUEUE_FILENAME);
+    
+    if queue_path.exists() {
+        fs::remove_file(&queue_path).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn trigger_sync(app: AppHandle) -> Result<String, String> {
+    let config = load_sync_config(&app).await;
+    if !config.enabled {
+        return Err("Nightly sync is disabled".to_string());
+    }
+    
+    let mut titles: Vec<(String, String)> = Vec::new();
+    
+    // Fetch featured articles
+    if config.news_enabled {
+        match fetch_featured_articles().await {
+            Ok(new_titles) => {
+                for title in new_titles {
+                    titles.push((title, "news".to_string()));
+                }
+            }
+            Err(e) => log::error!("Failed to fetch featured: {}", e),
+        }
+    }
+    
+    // Fetch random articles
+    if config.random_enabled {
+        for _ in 0..config.max_articles_per_sync.min(5) {
+            match fetch_random_article().await {
+                Ok(title) => {
+                    titles.push((title, "random".to_string()));
+                }
+                Err(e) => log::error!("Failed to fetch random: {}", e),
+            }
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        }
+    }
+    
+    // Add to queue
+    match add_to_queue(&app, titles.clone()).await {
+        Ok(count) => {
+            // Emit event to frontend
+            let _ = app.emit_all("sync-queue-updated", serde_json::json!({
+                "count": count,
+                "articles": titles.iter().map(|(t, s)| serde_json::json!({"title": t, "source": s})).collect::<Vec<_>>()
+            }));
+            
+            Ok(format!("Added {} articles to sync queue", count))
+        }
+        Err(e) => Err(format!("Failed to add to queue: {}", e)),
+    }
+}
+
+#[tauri::command]
+async fn scrape_webpage(url: String) -> Result<String, String> {
+    let client = reqwest::Client::new();
+    let response = client
+        .get(&url)
+        .header("User-Agent", "Mozilla/5.0 (compatible; AI-Wikipedia/1.0)")
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+    
+    let html = response.text().await.map_err(|e| format!("Failed to read response: {}", e))?;
+    
+    let re = regex::Regex::new(r"<[^>]+>").unwrap();
+    let text = re.replace_all(&html, " ");
+    let text = text.replace("  ", " ").replace("  ", " ");
+    
+    Ok(text.chars().take(5000).collect())
+}

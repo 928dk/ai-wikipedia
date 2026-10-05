@@ -1,0 +1,35 @@
+[package]
+name = "ai-wikipedia"
+version = "1.9.5"
+description = "AI Wikipedia with Ollama and multi-source verification"
+authors = ["you"]
+edition = "2021"
+
+# No [lib] section - using main.rs only
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+lz4 = "1.24"
+zstd = "0.13"
+tokio = { version = "1", features = ["fs", "io-util", "time", "macros"] }
+log = "0.4"
+env_logger = "0.11"
+reqwest = { version = "0.11", features = ["blocking", "json", "json"] }
+regex = "1"
+chrono = "0.4"
+fs2 = "0.4"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

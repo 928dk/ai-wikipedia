@@ -1,0 +1,63 @@
+{
+  "version": "1.0.0",
+  "exported": "2026-03-18T21:51:48.019658",
+  "source": "wikipedia",
+  "count": 5,
+  "articles": [
+    {
+      "id": 695299620,
+      "title": "Machine learning",
+      "content": "Machine learning (ML) is a field of study in artificial intelligence concerned with the development and study of statistical algorithms that can learn from data and generalize to unseen data, and thus perform tasks without explicit programming language instructions. Within a subdiscipline of machine learning, advances in the field of deep learning have allowed neural networks, a class of statistical algorithms, to surpass many previous machine learning approaches in performance.\nStatistics and mathematical optimisation (mathematical programming) methods compose the foundations of machine learning. Data mining is a related field of study, focusing on exploratory data analysis (EDA) through unsupervised learning.\nFrom a theoretical viewpoint, probably approximately correct learning provides a mathematical and statistical framework for describing machine learning. Most traditional machine learning and deep learning algorithms can be described as empirical risk minimisation under this framework.\n\n",
+      "summary": "Machine learning (ML) is a field of study in artificial intelligence concerned with the development and study of statistical algorithms that can learn from data and generalize to unseen data, and thus perform tasks without explicit programming language instructions. Within a subdiscipline of machine learning, advances in the field of deep learning have allowed neural networks, a class of statistical algorithms, to surpass many previous machine learning approaches in performance.\nStatistics and m...",
+      "created_at": "2026-03-18T21:51:44.312541",
+      "updated_at": "2026-03-18T21:51:44.312570",
+      "verification_status": "verified",
+      "confidence_score": 0.95,
+      "citations": "[{\"source\": \"Wikipedia\", \"url\": \"https://en.wikipedia.org/?curid=233488\", \"accessed\": \"2026-03-18T21:51:44.312590\"}]"
+    },
+    {
+      "id": 184026338,
+      "title": "Machine learning in bioinformatics",
+      "content": "Machine learning in bioinformatics is the application of machine learning algorithms to bioinformatics,including genomics, proteomics, microarrays, systems biology, evolution, and text mining.\nPrior to the emergence of machine learning, bioinformatics algorithms had to be programmed by hand; for problems such as protein structure prediction, this proved difficult. Machine learning techniques such as deep learning can learn features of data sets rather than requiring the programmer to define them individually. The algorithm can further learn how to combine low-level features into more abstract features, and so on. This multi-layered approach allows such systems to make sophisticated predictions when appropriately trained. These methods contrast with other computational biology approaches which, while exploiting existing datasets, do not allow the data to be interpreted and analyzed in unanticipated ways.\n\n",
+      "summary": "Machine learning in bioinformatics is the application of machine learning algorithms to bioinformatics,including genomics, proteomics, microarrays, systems biology, evolution, and text mining.\nPrior to the emergence of machine learning, bioinformatics algorithms had to be programmed by hand; for problems such as protein structure prediction, this proved difficult. Machine learning techniques such as deep learning can learn features of data sets rather than requiring the programmer to define them...",
+      "created_at": "2026-03-18T21:51:45.111931",
+      "updated_at": "2026-03-18T21:51:45.111953",
+      "verification_status": "verified",
+      "confidence_score": 0.95,
+      "citations": "[{\"source\": \"Wikipedia\", \"url\": \"https://en.wikipedia.org/?curid=53970843\", \"accessed\": \"2026-03-18T21:51:45.111963\"}]"
+    },
+    {
+      "id": -13009924,
+      "title": "Machine learning in earth sciences",
+      "content": "Applications of machine learning (ML) in earth sciences include geological mapping, gas leakage detection and geological feature identification. Machine learning is a subdiscipline of artificial intelligence aimed at developing programs that are able to classify, cluster, identify, and analyze vast and complex data sets without the need for explicit programming to do so. Earth science is the study of the origin, evolution, and future of Earth. The planet's system can be subdivided into four major components including the solid earth, atmosphere, hydrosphere, and biosphere.\nA variety of algorithms may be applied depending on the nature of the task. Some algorithms may perform significantly better than others for particular objectives. For example, convolutional neural networks (CNNs) are good at interpreting images, whilst more general neural networks may be used for soil classification, but can be more computationally expensive to train than alternatives such as support vector machines. The range of tasks to which ML (including deep learning) is applied has been ever-growing in recent decades, as has the development of other technologies such as unmanned aerial vehicles (UAVs), ultra-high resolution remote sensing technology, and high-performance computing. This has led to the availability of large high-quality datasets and more advanced algorithms.\n\n",
+      "summary": "Applications of machine learning (ML) in earth sciences include geological mapping, gas leakage detection and geological feature identification. Machine learning is a subdiscipline of artificial intelligence aimed at developing programs that are able to classify, cluster, identify, and analyze vast and complex data sets without the need for explicit programming to do so. Earth science is the study of the origin, evolution, and future of Earth. The planet's system can be subdivided into four majo...",
+      "created_at": "2026-03-18T21:51:45.949952",
+      "updated_at": "2026-03-18T21:51:45.949980",
+      "verification_status": "verified",
+      "confidence_score": 0.95,
+      "citations": "[{\"source\": \"Wikipedia\", \"url\": \"https://en.wikipedia.org/?curid=68735447\", \"accessed\": \"2026-03-18T21:51:45.949995\"}]"
+    },
+    {
+      "id": -26123043,
+      "title": "Machine learning in video games",
+      "content": "Artificial intelligence and machine learning techniques are used in video games for a wide variety of applications such as non-player character (NPC) control, procedural content generation (PCG) and deep learning-based content generation. Machine learning is a subset of artificial intelligence that uses historical data to build predictive and analytical models. This is in sharp contrast to traditional methods of artificial intelligence such as search trees and expert systems.\nInformation on machine learning techniques in the field of games is mostly known to public through research projects as most gaming companies choose not to publish specific information about their intellectual property. The most publicly known application of machine learning in games is likely the use of deep learning agents that compete with professional human players in complex strategy games. There has been a significant application of machine learning on games such as Atari/ALE, Doom, Minecraft, StarCraft, and car racing. Other games that did not originally exists as video games, such as chess and Go have also been affected by the machine learning.",
+      "summary": "Artificial intelligence and machine learning techniques are used in video games for a wide variety of applications such as non-player character (NPC) control, procedural content generation (PCG) and deep learning-based content generation. Machine learning is a subset of artificial intelligence that uses historical data to build predictive and analytical models. This is in sharp contrast to traditional methods of artificial intelligence such as search trees and expert systems.\nInformation on mach...",
+      "created_at": "2026-03-18T21:51:46.720250",
+      "updated_at": "2026-03-18T21:51:46.720270",
+      "verification_status": "verified",
+      "confidence_score": 0.95,
+      "citations": "[{\"source\": \"Wikipedia\", \"url\": \"https://en.wikipedia.org/?curid=60951296\", \"accessed\": \"2026-03-18T21:51:46.720278\"}]"
+    },
+    {
+      "id": -10990908,
+      "title": "Machine learning in physics",
+      "content": "Applying machine learning (ML) (including deep learning) methods to the study of quantum systems is an emergent area of physics research. A basic example of this is quantum state tomography, where a quantum state is learned from measurement. Other examples include learning Hamiltonians, learning quantum phase transitions, and automatically generating new quantum experiments. ML is effective at processing large amounts of experimental or calculated data in order to characterize an unknown quantum system, making its application useful in contexts including quantum information theory, quantum technology development, and computational materials design. In this context, for example, it can be used as a tool to interpolate pre-calculated interatomic potentials, or directly solving the Schrödinger equation with a variational method.\n\n",
+      "summary": "Applying machine learning (ML) (including deep learning) methods to the study of quantum systems is an emergent area of physics research. A basic example of this is quantum state tomography, where a quantum state is learned from measurement. Other examples include learning Hamiltonians, learning quantum phase transitions, and automatically generating new quantum experiments. ML is effective at processing large amounts of experimental or calculated data in order to characterize an unknown quantum...",
+      "created_at": "2026-03-18T21:51:47.519404",
+      "updated_at": "2026-03-18T21:51:47.519424",
+      "verification_status": "verified",
+      "confidence_score": 0.95,
+      "citations": "[{\"source\": \"Wikipedia\", \"url\": \"https://en.wikipedia.org/?curid=61373032\", \"accessed\": \"2026-03-18T21:51:47.519433\"}]"
+    }
+  ]
+}

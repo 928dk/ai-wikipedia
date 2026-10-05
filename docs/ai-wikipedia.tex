@@ -1,0 +1,261 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{geometry}
+\geometry{margin=1in}
+\usepackage{fancyhdr}
+\usepackage{hyperref}
+\usepackage{titlesec}
+\usepackage{listings}
+\usepackage{xcolor}
+
+% Custom colors
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+
+\lstdefinestyle{bash}{
+    backgroundcolor=\color{backcolour},
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{blue},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily,
+    breaklines=true,
+    frame=single,
+    numbers=left
+}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    filecolor=magenta,
+    urlcolor=cyan,
+}
+
+\pagestyle{fancy}
+\fancyhf{}
+\rhead{\thepage}
+\lhead{AI Wikipedia Documentation}
+
+\title{\textbf{AI Wikipedia}\\\large Privacy-First AI Encyclopedia with Verification}
+\author{}
+\date{Version 1.1.0 -- March 2026}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{empty}
+
+\vspace{2in}
+\begin{center}
+\Large A portable, privacy-first AI Wikipedia powered by Ollama with multi-source verification.
+\end{center}
+
+\newpage
+
+\tableofcontents
+\newpage
+
+\section{Overview}
+
+AI Wikipedia is a privacy-first application that generates articles using local Ollama LLM and verifies claims against 20+ authoritative sources including Lex.dk (Den Store Danske).
+
+\section{Features}
+
+\begin{itemize}
+    \item \textbf{AI Article Generation} - Create articles using local Ollama LLM
+    \item \textbf{AI Chat Interface} - CLI-style terminal for asking questions directly (always visible)
+    \item \textbf{Multi-Source Verification} - Verify claims against 20+ authoritative sources
+    \item \textbf{Lex.dk (Den Store Danske)} - Denmark's National Encyclopedia (most trusted)
+    \item \textbf{Wikipedia \& WikiData} - International encyclopedia and structured data
+    \item \textbf{Compressed Storage} - LZ4/Zstd compression for Wikipedia dumps
+    \item \textbf{Import from Wikipedia} - Import real Wikipedia articles
+    \item \textbf{Portable \& Syncable} - Export/import JSON for syncing across devices
+    \item \textbf{Dark Mode} - Built-in theme toggle
+\end{itemize}
+
+\section{Quick Start}
+
+\subsection{Prerequisites}
+
+\begin{enumerate}
+    \item \textbf{Ollama} - Install from \url{ollama.ai}
+\end{enumerate}
+
+\subsection{Installation}
+
+\begin{lstlisting}[language=bash]
+# Clone or copy the project
+cd /path/to/ai-wikipedia
+
+# Install dependencies
+npm install
+
+# Run in development mode
+npm run dev
+\end{lstlisting}
+
+Open \url{http://localhost:1420} in your browser.
+
+\section{Usage}
+
+\subsection{AI Chat (Always Visible)}
+
+The AI CLI chat is always visible under the search bar:
+\begin{itemize}
+    \item Select model: llama3.2, mistral, phi3, codellama
+    \item Type questions directly and press Send or Enter
+    \item Click "Save as Article" to save responses
+\end{itemize}
+
+\subsection{Generate Article with AI}
+
+\begin{enumerate}
+    \item Click "+ Generate with AI"
+    \item Enter a topic (e.g., "Quantum Computing")
+    \item Click Generate
+    \item Article is created using Ollama locally
+\end{enumerate}
+
+\subsection{Verify Claims}
+
+\begin{enumerate}
+    \item Open any article
+    \item Click "Verify Claims"
+    \item Each claim is checked against enabled sources
+    \item Results show: Verified, Disputed, or Unverified
+\end{enumerate}
+
+\subsection{Enable/Disable Sources}
+
+\begin{enumerate}
+    \item Click "Sources" in the header
+    \item Toggle sources on/off
+    \item Add custom API endpoints
+    \item Changes persist in localStorage
+\end{enumerate}
+
+\subsection{Import from Wikipedia}
+
+\begin{enumerate}
+    \item Click "Import Wikipedia"
+    \item Enter article titles (one per line)
+    \item Click "Import"
+    \item Articles are added with verified status
+\end{enumerate}
+
+\subsection{Export / Sync Data}
+
+\begin{enumerate}
+    \item Click "Export / Sync"
+    \item Click "Export All" to download JSON
+    \item Save to USB or cloud storage
+    \item On target device, use "Import from JSON"
+\end{enumerate}
+
+\subsection{Compressed Storage}
+
+\begin{enumerate}
+    \item Click "Storage" in the header
+    \item Choose compression: LZ4 (fast) or Zstd (better ratio)
+    \item Click "Save to Compressed Storage"
+    \item View compression stats: original vs compressed size
+\end{enumerate}
+
+\section{Verification Sources}
+
+\subsection{Primary Sources (Enabled by Default)}
+
+\begin{tabular}{|l|l|p{5cm}|}
+    \hline
+    Source & Type & Description \\
+    \hline
+    Lex.dk & Encyclopedia & Denmark's National Encyclopedia \\
+    Wikipedia & Encyclopedia & International encyclopedia \\
+    WikiData & Structured Data & Structured knowledge base \\
+    \hline
+\end{tabular}
+
+\subsection{Danish Public APIs}
+
+Available APIs: Danmarks Statistik, CVR.dk, Retsinformation, Nationalbanken, Dataforsyningen, DMI Vejr, MotorAPI, SSI COVID-19, Folketinget, DSB Feeds, Energi Data Service, elprisenligenu.dk
+
+\section{Compression}
+
+\subsection{Expected Ratios}
+
+\begin{tabular}{|l|l|l|l|}
+    \hline
+    Algorithm & Ratio & Speed & CPU Impact \\
+    \hline
+    LZ4 & ~40\% & 2GB/s & Very Low \\
+    Zstd & ~35\% & 500MB/s & Low-Med \\
+    \hline
+\end{tabular}
+
+For 16GB Wikipedia: ~5-6GB with LZ4, ~4-5GB with Zstd.
+
+\section{Privacy}
+
+\begin{itemize}
+    \item All AI processing uses local Ollama - no data sent to external AI services
+    \item Verification uses public APIs (read-only)
+    \item Data stored locally on your machine
+    \item Export files are unencrypted JSON - keep them secure
+\end{itemize}
+
+\section{Tech Stack}
+
+\begin{itemize}
+    \item \textbf{Frontend}: React 18 + TypeScript + TailwindCSS
+    \item \textbf{Build Tool}: Vite 5.4
+    \item \textbf{Desktop}: Tauri 2.0 (Rust)
+    \item \textbf{Compression}: LZ4 + Zstd (Rust)
+    \item \textbf{AI}: Ollama (local LLM)
+\end{itemize}
+
+\section{Project Structure}
+
+\begin{verbatim}
+ai-wikipedia/
+├── src/
+│   ├── App.tsx          # Main application
+│   ├── main.tsx         # React entry point
+│   └── index.css        # Tailwind styles
+├── src-tauri/           # Tauri desktop app
+│   ├── src/
+│   │   ├── lib.rs       # Rust commands
+│   │   └── main.rs      # Entry point
+│   └── Cargo.toml       # Rust dependencies
+├── package.json
+├── vite.config.ts
+├── tailwind.config.js
+├── README.md
+├── SPEC.md
+├── CHANGELOG.md
+├── CONTEXT.md
+└── HOWTHISWASBUILT.md
+\end{verbatim}
+
+\section{Troubleshooting}
+
+\subsection{"Ollama not available"}
+
+\begin{lstlisting}[language=bash]
+# Start Ollama
+ollama serve
+
+# Check if running
+curl http://localhost:11434/api/tags
+
+# List available models
+ollama list
+\end{lstlisting}
+
+\section{License}
+
+MIT License
+
+\end{document}

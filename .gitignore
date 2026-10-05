@@ -1,0 +1,17 @@
+node_modules
+dist
+target
+.DS_Store
+*.log
+
+# --- added by publish-sanitize ---
+venv/
+.venv/
+node_modules/
+__pycache__/
+*.pyc
+.env
+.env.local
+*.log
+data/
+archives/
